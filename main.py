@@ -1,72 +1,51 @@
-import requests
+import asyncio
+from playwright.sync_api import sync_playwright
 import pandas as pd
 from datetime import datetime
 import json
 
-def scrape():
-    # 这里的 URL 我们换成主页试试，有时直接请求接口会被拦截
-    url = "http://xxfb.mwr.cn/getPagedSq.do"
-    
-    # 模拟一个非常真实的 Chrome 浏览器
-    headers = {
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Accept-Encoding": "gzip, deflate",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "Host": "xxfb.mwr.cn",
-        "Origin": "http://xxfb.mwr.cn",
-        "Proxy-Connection": "keep-alive",
-        "Referer": "http://xxfb.mwr.cn/sq_djdh.html",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "X-Requested-With": "XMLHttpRequest"
-    }
-    
-    # 严格按照网页发送的参数格式
-    payload = {
-        "pageIndex": "1",
-        "pageSize": "100",
-        "stName": "",
-        "rvName": "",
-        "date": datetime.now().strftime('%Y-%m-%d'),
-        "sortNm": "z",
-        "sortOrder": "desc"
-    }
-
-    print(f"🚀 开始尝试通过伪装请求获取数据: {datetime.now()}")
-
-    try:
-        # 使用 Session 保持连接特征
-        session = requests.Session()
-        response = session.post(url, data=payload, headers=headers, timeout=15)
+def run():
+    with sync_playwright() as p:
+        # 启动无头浏览器
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
         
-        # 打印一下状态码，方便我们调试
-        print(f"📡 服务器返回状态码: {response.status_code}")
+        print(f"🚀 正在启动浏览器访问页面...")
         
-        if response.status_code == 200:
-            data = response.json()
-            if 'result' in data and data['result']:
-                df = pd.DataFrame(data['result'])
-                
-                # 只要主要数据列
-                cols = {
-                    'rvNm': '流域',
-                    'stNm': '站名',
-                    'tm': '时间',
-                    'z': '水位',
-                    'q': '流量'
-                }
-                df = df.rename(columns=cols)[list(cols.values())]
-                
-                filename = f"water_data_{datetime.now().strftime('%Y%m%d')}.csv"
-                df.to_csv(filename, index=False, encoding='utf-8-sig')
-                print(f"✨ 成功！抓取到 {len(df)} 条记录，已保存。")
-            else:
-                print("⚠️ 成功连接但没拿到数据，可能是这会儿服务器没更新。")
+        # 准备捕获 API 响应数据
+        final_data = []
+
+        def handle_response(response):
+            # 这里的 URL 是我们之前 404 的那个接口
+            if "getPagedSq.do" in response.url:
+                try:
+                    json_data = response.json()
+                    if 'result' in json_data:
+                        final_data.extend(json_data['result'])
+                        print(f"✅ 已拦截到数据接口，获取到 {len(json_data['result'])} 条记录")
+                except Exception as e:
+                    print(f"⚠️ 解析响应失败: {e}")
+
+        # 监听所有网络响应
+        page.on("response", handle_response)
+
+        # 访问主页，触发后台 API 请求
+        try:
+            page.goto("http://xxfb.mwr.cn/sq_djdh.html", wait_until="networkidle", timeout=60000)
+            # 给页面一点时间加载完数据
+            page.wait_for_timeout(5000) 
+        except Exception as e:
+            print(f"❌ 页面加载超时或出错: {e}")
+
+        if final_data:
+            df = pd.DataFrame(final_data)
+            # 这里的字段名需要根据实际拦截到的 JSON 修改，通常是 rvNm, stNm 等
+            df.to_csv(f"water_data_{datetime.now().strftime('%Y%m%d_%H')}.csv", index=False, encoding='utf-8-sig')
+            print(f"✨ 数据抓取成功，已保存至 CSV")
         else:
-            print(f"❌ 请求失败，错误代码: {response.status_code}")
-            
-    except Exception as e:
-        print(f"🔥 发生了意外错误: {e}")
+            print("❌ 未能拦截到目标数据，请检查页面结构是否变化")
+
+        browser.close()
 
 if __name__ == "__main__":
-    scrape()
+    run()
