@@ -1,65 +1,72 @@
 import requests
 import pandas as pd
 from datetime import datetime
+import json
 
 def scrape():
-    # 1. 找到水利部真正的隐藏数据接口
-    # 这个 URL 是该网页请求数据的真实后台地址
-    api_url = "http://xxfb.mwr.cn/getPagedSq.do"
+    # 这里的 URL 我们换成主页试试，有时直接请求接口会被拦截
+    url = "http://xxfb.mwr.cn/getPagedSq.do"
     
-    # 2. 模拟浏览器请求头，防止被拦截
+    # 模拟一个非常真实的 Chrome 浏览器
     headers = {
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Host": "xxfb.mwr.cn",
+        "Origin": "http://xxfb.mwr.cn",
+        "Proxy-Connection": "keep-alive",
+        "Referer": "http://xxfb.mwr.cn/sq_djdh.html",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "http://xxfb.mwr.cn/sq_djdh.html"
+        "X-Requested-With": "XMLHttpRequest"
     }
     
-    # 3. 构造请求参数（对应“大江大河”表格）
+    # 严格按照网页发送的参数格式
     payload = {
-        "pageIndex": 1,
-        "pageSize": 100, # 爬取前100条数据
+        "pageIndex": "1",
+        "pageSize": "100",
         "stName": "",
         "rvName": "",
-        "date": datetime.now().strftime('%Y-%m-%d')
+        "date": datetime.now().strftime('%Y-%m-%d'),
+        "sortNm": "z",
+        "sortOrder": "desc"
     }
 
-    print(f"正在尝试从接口获取数据: {datetime.now()}")
+    print(f"🚀 开始尝试通过伪装请求获取数据: {datetime.now()}")
 
     try:
-        # 发送请求
-        response = requests.post(api_url, data=payload, headers=headers)
-        response.raise_for_status() # 检查请求是否成功
+        # 使用 Session 保持连接特征
+        session = requests.Session()
+        response = session.post(url, data=payload, headers=headers, timeout=15)
         
-        # 解析返回的 JSON 数据
-        data = response.json()
+        # 打印一下状态码，方便我们调试
+        print(f"📡 服务器返回状态码: {response.status_code}")
         
-        # 提取表格核心内容（在 result 字段下）
-        if 'result' in data and data['result']:
-            df = pd.DataFrame(data['result'])
-            
-            # 中文列名映射（让 CSV 更好看）
-            column_map = {
-                'rvNm': '流域/水系',
-                'stNm': '站名',
-                'tm': '时间',
-                'z': '水位(米)',
-                'q': '流量(立方米/秒)',
-                'wptn': '水势'
-            }
-            df = df.rename(columns=column_map)
-            
-            # 只要我们关心的列
-            available_cols = [c for c in column_map.values() if c in df.columns]
-            df = df[available_cols]
-
-            # 保存文件
-            filename = f"water_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-            df.to_csv(filename, index=False, encoding='utf-8-sig')
-            print(f"✅ 抓取成功！已保存 {len(df)} 行数据到 {filename}")
+        if response.status_code == 200:
+            data = response.json()
+            if 'result' in data and data['result']:
+                df = pd.DataFrame(data['result'])
+                
+                # 只要主要数据列
+                cols = {
+                    'rvNm': '流域',
+                    'stNm': '站名',
+                    'tm': '时间',
+                    'z': '水位',
+                    'q': '流量'
+                }
+                df = df.rename(columns=cols)[list(cols.values())]
+                
+                filename = f"water_data_{datetime.now().strftime('%Y%m%d')}.csv"
+                df.to_csv(filename, index=False, encoding='utf-8-sig')
+                print(f"✨ 成功！抓取到 {len(df)} 条记录，已保存。")
+            else:
+                print("⚠️ 成功连接但没拿到数据，可能是这会儿服务器没更新。")
         else:
-            print("❌ 接口返回了空数据，可能是参数或日期问题。")
+            print(f"❌ 请求失败，错误代码: {response.status_code}")
             
     except Exception as e:
-        print(f"❌ 抓取发生错误: {e}")
+        print(f"🔥 发生了意外错误: {e}")
 
 if __name__ == "__main__":
     scrape()
